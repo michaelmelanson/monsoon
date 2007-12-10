@@ -1,0 +1,2 @@
+
+-record(manifest, {hash, chunks}).

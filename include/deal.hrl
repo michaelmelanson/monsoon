@@ -1,0 +1,2 @@
+
+-record(deal, {offer, request}).
