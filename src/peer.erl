@@ -16,7 +16,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {socket, debt, chunks, update_timer}).
+-record(state, {socket, debt=0, chunks=[], update_timer}).
 
 -define(SERVER, ?MODULE).
 
@@ -46,7 +46,8 @@ start_link(Host, Port) ->
 %%--------------------------------------------------------------------
 init([Host, Port]) ->
     {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {packet, line}]),
-    
+    ok = gen_tcp:send(Socket, "Hello\n"),
+
     timer:send_after(?UPDATE_INTERVAL, update_lists),
     {ok, #state{socket=Socket}}.
 
@@ -78,12 +79,31 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info(update_lists, State) ->
-    error_logger:info_report("Updating lists"),
-    
-    ok = gen_tcp:send(State#state.socket, "SEND CHUNKS\n"),
-    
+handle_info({tcp, _Port, <<"Send chunks\n">>}, State) ->
+    case State#state.chunks of
+        [] ->
+            ok = gen_tcp:send(State#state.socket,
+                              "Sorry, I have no chunks\n");
+        Chunks ->
+            ok = gen_tcp:send(State#state.socket,
+                              io_lib:format("Okay. I have ~w chunks\n",
+                                            [length(Chunks)])),
+            lists:foreach(fun(Chunk) ->
+                                  ok = gen_tcp:send(State#state.socket,
+                                                    Chunk)
+                          end, Chunks),
+            ok = gen_tcp:send(State#state.socket, "That's all, folks\n")
+    end,
+    {noreply, State};
 
+handle_info({tcp, _Port, Data}, State) ->
+    ok = gen_tcp:send(State#state.socket,
+                      "I don't know what you mean\n"),
+    error_logger:warning_report("Unknown TCP data received: ~p", Data),
+    {noreply, State};
+
+handle_info(update_lists, State) ->
+    ok = gen_tcp:send(State#state.socket, "Send chunks\n"),
     
     timer:send_after(?UPDATE_INTERVAL, update_lists),
     {noreply, State}.
@@ -96,7 +116,7 @@ handle_info(update_lists, State) ->
 %% The return value is ignored.
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
-    ok = gen_tcp:send(State#state.socket, "BYE"),
+    ok = gen_tcp:send(State#state.socket, "Goodbye"),
 
     ok.
 
