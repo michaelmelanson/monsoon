@@ -79,6 +79,11 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
+handle_info({tcp, _Port, <<"Hello\n">>}, State) ->
+    ok = gen_tcp:send(State#state.socket,
+                      "How can I help you?\n"),
+    {noreply, State};
+
 handle_info({tcp, _Port, <<"Send chunks\n">>}, State) ->
     case State#state.chunks of
         [] ->
@@ -102,6 +107,10 @@ handle_info({tcp, _Port, Data}, State) ->
     error_logger:warning_report("Unknown TCP data received: ~p", Data),
     {noreply, State};
 
+handle_info({tcp_closed, _Port}, State) ->
+    {stop, "Other side terminated connection", State};
+    
+
 handle_info(update_lists, State) ->
     ok = gen_tcp:send(State#state.socket, "Send chunks\n"),
     
@@ -116,7 +125,8 @@ handle_info(update_lists, State) ->
 %% The return value is ignored.
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
-    ok = gen_tcp:send(State#state.socket, "Goodbye"),
+    % this may not succeed, so don't trap return
+    gen_tcp:send(State#state.socket, "Goodbye"),
 
     ok.
 
