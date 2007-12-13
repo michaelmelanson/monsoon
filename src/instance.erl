@@ -77,7 +77,6 @@ handle_call({connect, Host, Port}, _From, State) ->
 handle_call(chunk_list, _From, State) ->
     {reply, State#state.chunks, State}.
 
-%    {stop, "unknown call", State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
