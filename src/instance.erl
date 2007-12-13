@@ -10,12 +10,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, chunk_list/1, connect/3, add_peer/2]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2,
+         handle_info/2, terminate/2, code_change/3]).
 
--record(state, {peers=[]}).
+-record(state, {peers=[], chunks=[]}).
 
 -define(SERVER, ?MODULE).
 
@@ -28,6 +29,21 @@
 %%--------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+
+connect(Instance, Host, Port) ->
+    gen_server:call(Instance, {connect, Host, Port}).
+
+add_peer(Instance, Peer) ->
+    gen_server:cast(Instance, {add_peer, Peer}).
+
+%%--------------------------------------------------------------------
+%% Function: chunk_list(Instance) -> [#chunk]
+%% Description: Starts the server
+%%--------------------------------------------------------------------
+chunk_list(Instance) ->
+    gen_server:call(Instance, chunk_list).
+
 
 %%====================================================================
 %% gen_server callbacks
@@ -53,9 +69,15 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
+handle_call({connect, Host, Port}, _From, State) ->
+    Peer = peer:start_link({connect, Host, Port}, self()),
+    gen_server:cast(self(), {add_peer, Peer}),
+    {reply, ok, State};
 
-    {stop, "unknown call", State}.
+handle_call(chunk_list, _From, State) ->
+    {reply, State#state.chunks, State}.
+
+%    {stop, "unknown call", State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -64,9 +86,7 @@ handle_call(_Request, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 handle_cast({add_peer, Peer}, State) ->
-    NewConnection = connection:start_link(Peer),
-
-    NewState = State#state{peers=[NewConnection|State#state.peers]},
+    NewState = State#state{peers=[Peer|State#state.peers]},
     {noreply, NewState}.
 
 %%--------------------------------------------------------------------
@@ -86,6 +106,7 @@ handle_info(_Info, State) ->
 %% The return value is ignored.
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) ->
+    io:format("Instance terminating~n"),
     ok.
 
 %%--------------------------------------------------------------------

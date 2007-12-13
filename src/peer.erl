@@ -16,7 +16,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {socket, debt=0, chunks=[], update_timer}).
+-record(state, {socket, instance, update_timer}).
 
 -define(SERVER, ?MODULE).
 
@@ -30,8 +30,10 @@
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Host, Port) ->
-    gen_server:start_link(?MODULE, [Host, Port], []).
+start_link({connect, Host, Port}, Instance) ->
+    gen_server:start_link(?MODULE, [{connect, Host, Port}, Instance], []);
+start_link({listen, Port}, Instance) ->
+    gen_server:start_link(?MODULE, [{listen, Port}, Instance], []).
 
 %%====================================================================
 %% gen_server callbacks
@@ -44,12 +46,21 @@ start_link(Host, Port) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Host, Port]) ->
+init([{connect, Host, Port}, Instance]) ->
+    io:format("Connecting to ~p on port ~w~n", [Host, Port]),
+
     {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {packet, line}]),
     ok = gen_tcp:send(Socket, "Hello\n"),
 
     timer:send_after(?UPDATE_INTERVAL, update_lists),
-    {ok, #state{socket=Socket}}.
+    {ok, #state{socket=Socket, instance=Instance}};
+
+init([{accept, Socket}, Instance]) ->
+    ok = gen_tcp:send(Socket, "Hello\n"),
+    
+    timer:send_after(?UPDATE_INTERVAL, update_lists),
+    {ok, #state{socket=Socket, instance=Instance}}.
+    
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -85,20 +96,17 @@ handle_info({tcp, _Port, <<"Hello\n">>}, State) ->
     {noreply, State};
 
 handle_info({tcp, _Port, <<"Send chunks\n">>}, State) ->
-    case State#state.chunks of
+    case instance:chunk_list(State#state.instance) of
         [] ->
             ok = gen_tcp:send(State#state.socket,
-                              "Sorry, I have no chunks\n");
+                              "I don't have any chunks\n");
         Chunks ->
-            ok = gen_tcp:send(State#state.socket,
-                              io_lib:format("Okay. I have ~w chunks\n",
-                                            [length(Chunks)])),
             lists:foreach(fun(Chunk) ->
                                   ok = gen_tcp:send(State#state.socket,
                                                     Chunk)
-                          end, Chunks),
-            ok = gen_tcp:send(State#state.socket, "That's all, folks\n")
+                          end, Chunks)
     end,
+
     {noreply, State};
 
 handle_info({tcp, _Port, Data}, State) ->
@@ -126,7 +134,7 @@ handle_info(update_lists, State) ->
 %%--------------------------------------------------------------------
 terminate(_Reason, State) ->
     % this may not succeed, so don't trap return
-    gen_tcp:send(State#state.socket, "Goodbye"),
+    gen_tcp:send(State#state.socket, "Goodbye\n"),
 
     ok.
 
