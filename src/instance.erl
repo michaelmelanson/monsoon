@@ -10,15 +10,18 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, chunk_list/1, connect/3, add_peer/2]).
+-export([start_link/0, chunk_list/1, connect/3, peer_connected/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2,
          handle_info/2, terminate/2, code_change/3]).
 
--record(state, {peers=[], chunks=[]}).
+-record(state, {peers=[], chunks=[], listener, listen_socket}).
 
 -define(SERVER, ?MODULE).
+
+
+-define(DEFAULT_PORT, 5000).
 
 %%====================================================================
 %% API
@@ -34,8 +37,8 @@ start_link() ->
 connect(Instance, Host, Port) ->
     gen_server:call(Instance, {connect, Host, Port}).
 
-add_peer(Instance, Peer) ->
-    gen_server:cast(Instance, {add_peer, Peer}).
+peer_connected(Instance, Peer) ->
+    gen_server:cast(Instance, {peer_connected, Peer}).
 
 %%--------------------------------------------------------------------
 %% Function: chunk_list(Instance) -> [#chunk]
@@ -57,7 +60,12 @@ chunk_list(Instance) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, #state{}}.
+    {ok, ListenSocket} = gen_tcp:listen(?DEFAULT_PORT, [binary, 
+                                                        {packet, line}]),
+
+    Listener = spawn_listener(ListenSocket),
+    {ok, #state{listener=Listener, 
+                listen_socket=ListenSocket}}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_call(Request, From, State) ->
@@ -84,9 +92,15 @@ handle_call(chunk_list, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+handle_cast({peer_connected, Peer}, State) ->
+    error_logger:info_msg("~p new peer connected", [self()]),
+
+    Listener = spawn_listener(State#state.listen_socket),
+    gen_server:cast(self(), {add_peer, Peer}),
+    {noreply, State#state{listener=Listener}};
+
 handle_cast({add_peer, Peer}, State) ->
-    NewState = State#state{peers=[Peer|State#state.peers]},
-    {noreply, NewState}.
+    {noreply, State#state{peers=[Peer|State#state.peers]}}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -118,3 +132,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% Internal functions
 %%--------------------------------------------------------------------
+spawn_listener(ListenSocket) ->
+    {ok, Listener} = peer:start_link({listen, ListenSocket}, self()),
+    error_logger:info_msg("~p new listener spawned: ~p~n", [self(),
+                                                            Listener]),
+    Listener.
