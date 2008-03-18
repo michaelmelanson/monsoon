@@ -48,7 +48,7 @@ init({connect, Node, IP, Port}) ->
 
     {ok, Sock} = gen_tcp:connect(IP, Port, [list]),
     
-    io:format("~p[~p]: Connected to ~p~n", [?MODULE, self(), Node]),
+    io:format("~p[~p]: Connected!~n", [?MODULE, Node]),
     ok = gen_tcp:send(Sock, protocol:encode({node, node()})),
     
     {ok, #state{node=Node, socket=Sock}};
@@ -93,7 +93,7 @@ handle_cast(_Msg, State) ->
 handle_info({tcp, _Sock, Data}, State) ->
     case protocol:decode(Data) of
         {node, Node} when State#state.node =:= unknown ->
-            io:format("~p[~p]: Other end is ~p~n", [Node, self(), Node]),
+            io:format("~p[~p]: Connected!~n", [?MODULE, Node]),
             {noreply, State#state{node=Node}};
             
         _ ->
