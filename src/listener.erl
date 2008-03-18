@@ -47,6 +47,10 @@ port() -> gen_server:call(?SERVER, port).
 init([]) ->
     {ok, Sock} = gen_tcp:listen(0, [list]),
     {ok, Port} = inet:port(Sock),
+    
+    io:format("~p: waiting for connection on port ~p~n",
+              [?MODULE, Port]),
+    
     gen_server:cast(?MODULE, accept),
     
     {ok, #state{socket=Sock, port=Port}}.
@@ -71,10 +75,10 @@ handle_call(port, _From, State) ->
 %%--------------------------------------------------------------------
 handle_cast(accept, State) ->    
     Pid = spawn_link(fun() ->
-        io:format("~p: waiting for connection on port ~p~n",
-                  [?MODULE, State#state.port]),
         {ok, Socket} = gen_tcp:accept(State#state.socket),
         peer_sup:new_on_socket(Socket),
+    
+        io:format("~p: New connection~n", [?MODULE]),
         gen_server:cast(?SERVER, accept)
     end),
     

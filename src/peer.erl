@@ -93,6 +93,7 @@ handle_cast(_Msg, State) ->
 handle_info({tcp, _Sock, Data}, State) ->
     case protocol:decode(Data) of
         {node, Node} when State#state.node =:= unknown ->
+            io:format("~p[~p]: Other end is ~p~n", [Node, self(), Node]),
             {noreply, State#state{node=Node}};
             
         _ ->
