@@ -81,7 +81,6 @@ handle_cast(_Msg, State) ->
 handle_info({udp, _Sock, IP, _InPort, Data}, State) ->
     case protocol:decode(Data) of
         {node, Node, Port} ->
-            io:format("~p: Broadcast from ~p:~p (~p)~n", [?MODULE, IP, Port, Node]),
             peer_sup:ensure_connected(Node, IP, Port);
         _ ->
             io:format("~p: Invalid broadcast received~n", [?MODULE])

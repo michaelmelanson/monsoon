@@ -31,9 +31,7 @@ start_link() ->
 
 connected_to(Node) ->
     Nodes = lists:map(fun({_Id, Child, _Type, _Modules}) ->
-                          Result = peer:node(Child),
-                          io:format("peer:node(~p) = ~p~n", [Child, Result]),
-                          Result
+                          peer:node(Child)
                       end, supervisor:which_children(?MODULE)),
                  
     lists:any(fun(X) -> X =:= Node end, Nodes).
@@ -43,10 +41,8 @@ ensure_connected(Node, _IP, _Port) when Node =:= node()->
 ensure_connected(Node, IP, Port) ->
     case connected_to(Node) of
         false ->
-            io:format("~p: No connection to node ~p~n", [?MODULE, Node]),
             new_connect(Node, IP, Port);
         _ ->
-            io:format("~p: Already connected to node ~p~n", [?MODULE, Node]),
             ok
     end.
     

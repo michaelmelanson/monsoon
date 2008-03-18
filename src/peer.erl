@@ -48,7 +48,7 @@ init({connect, Node, IP, Port}) ->
 
     {ok, Sock} = gen_tcp:connect(IP, Port, [list]),
     
-    io:format("~p[~p]: Connected!~n", [?MODULE, self()]),
+    io:format("~p[~p]: Connected to ~p~n", [?MODULE, self(), Node]),
     ok = gen_tcp:send(Sock, protocol:encode({node, node()})),
     
     {ok, #state{node=Node, socket=Sock}};
