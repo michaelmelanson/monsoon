@@ -1,22 +1,22 @@
 %%%-------------------------------------------------------------------
-%%% File    : peer.erl
+%%% File    : listener.erl
 %%% Author  : Michael Melanson
 %%% Description : 
 %%%
 %%% Created : 2008-03-18 by Michael Melanson
 %%%-------------------------------------------------------------------
--module(peer).
+-module(listener).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, node/1]).
+-export([start_link/0, port/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {node=unknown, socket}).
+-record(state, {socket, port, acceptor_pid}).
 
 -define(SERVER, ?MODULE).
 
@@ -27,10 +27,11 @@
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Args) ->
-    gen_server:start_link(?MODULE, Args, []).
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-node(Pid) -> gen_server:call(Pid, node).
+%% Returns the listener's port number
+port() -> gen_server:call(?SERVER, port).
 
 %%====================================================================
 %% gen_server callbacks
@@ -43,20 +44,12 @@ node(Pid) -> gen_server:call(Pid, node).
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init({connect, Node, IP, Port}) ->
-    whiteboard:subscribe(),
-
-    {ok, Sock} = gen_tcp:connect(IP, Port, [list]),
+init([]) ->
+    {ok, Sock} = gen_tcp:listen(0, [list]),
+    {ok, Port} = inet:port(Sock),
+    gen_server:cast(?MODULE, accept),
     
-    io:format("~p[~p]: Connected!~n", [?MODULE, self()]),
-    ok = gen_tcp:send(Sock, protocol:encode({node, node()})),
-    
-    {ok, #state{node=Node, socket=Sock}};
-    
-init({socket, Sock}) ->
-    whiteboard:subscribe(),
-    
-    {ok, #state{socket=Sock}}.
+    {ok, #state{socket=Sock, port=Port}}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -67,13 +60,8 @@ init({socket, Sock}) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({event, _}, _From, State) ->
-    {reply, false, State};
-handle_call(node, _From, State) ->
-    {reply, State#state.node, State};
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(port, _From, State) ->
+    {reply, State#state.port, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -81,8 +69,16 @@ handle_call(_Request, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+handle_cast(accept, State) ->    
+    Pid = spawn_link(fun() ->
+        io:format("~p: waiting for connection on port ~p~n",
+                  [?MODULE, State#state.port]),
+        {ok, Socket} = gen_tcp:accept(State#state.socket),
+        peer_sup:new_on_socket(Socket),
+        gen_server:cast(?SERVER, accept)
+    end),
+    
+    {noreply, State#state{acceptor_pid=Pid}}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -90,18 +86,9 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({tcp, _Sock, Data}, State) ->
-    case protocol:decode(Data) of
-        {node, Node} when State#state.node =:= unknown ->
-            {noreply, State#state{node=Node}};
-            
-        _ ->
-            io:format("~p[~p]: Bad data received~n", [?MODULE, self()]),
-            {stop, invalid_data_received, State}
-    end;
-handle_info({tcp_closed, _Sock}, State) ->
-    {stop, socket_closed, State}.
-    
+handle_info(_Info, State) ->
+    {noreply, State}.
+
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()
 %% Description: This function is called by a gen_server when it is about to

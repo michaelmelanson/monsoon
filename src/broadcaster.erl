@@ -1,22 +1,22 @@
 %%%-------------------------------------------------------------------
-%%% File    : peer.erl
+%%% File    : broadcaster.erl
 %%% Author  : Michael Melanson
 %%% Description : 
 %%%
 %%% Created : 2008-03-18 by Michael Melanson
 %%%-------------------------------------------------------------------
--module(peer).
+-module(broadcaster).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, node/1]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {node=unknown, socket}).
+-record(state, {socket}).
 
 -define(SERVER, ?MODULE).
 
@@ -27,10 +27,8 @@
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Args) ->
-    gen_server:start_link(?MODULE, Args, []).
-
-node(Pid) -> gen_server:call(Pid, node).
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%====================================================================
 %% gen_server callbacks
@@ -43,18 +41,11 @@ node(Pid) -> gen_server:call(Pid, node).
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init({connect, Node, IP, Port}) ->
+init([]) ->
     whiteboard:subscribe(),
-
-    {ok, Sock} = gen_tcp:connect(IP, Port, [list]),
     
-    io:format("~p[~p]: Connected!~n", [?MODULE, self()]),
-    ok = gen_tcp:send(Sock, protocol:encode({node, node()})),
-    
-    {ok, #state{node=Node, socket=Sock}};
-    
-init({socket, Sock}) ->
-    whiteboard:subscribe(),
+    {ok, Sock} = gen_udp:open(0, [binary, {broadcast, true}]),
+    setup_timer(),
     
     {ok, #state{socket=Sock}}.
 
@@ -69,8 +60,6 @@ init({socket, Sock}) ->
 %%--------------------------------------------------------------------
 handle_call({event, _}, _From, State) ->
     {reply, false, State};
-handle_call(node, _From, State) ->
-    {reply, State#state.node, State};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -90,18 +79,12 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({tcp, _Sock, Data}, State) ->
-    case protocol:decode(Data) of
-        {node, Node} when State#state.node =:= unknown ->
-            {noreply, State#state{node=Node}};
-            
-        _ ->
-            io:format("~p[~p]: Bad data received~n", [?MODULE, self()]),
-            {stop, invalid_data_received, State}
-    end;
-handle_info({tcp_closed, _Sock}, State) ->
-    {stop, socket_closed, State}.
+handle_info(broadcast, State) ->
+    send_broadcast(State#state.socket),
     
+    setup_timer(),
+    {noreply, State}.
+
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()
 %% Description: This function is called by a gen_server when it is about to
@@ -122,3 +105,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+send_broadcast(Socket) ->
+    gen_udp:send(Socket, "255.255.255.255", protocol:broadcast_port(),
+                 protocol:encode({node, node(), listener:port()})).
+
+setup_timer() ->
+    timer:send_after(10000, broadcast).

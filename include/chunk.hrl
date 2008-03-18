@@ -1,3 +1,3 @@
 
 
--record(chunk, {hash}).
+-record(chunk, {hash, contents}).

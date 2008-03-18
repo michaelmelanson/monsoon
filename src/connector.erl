@@ -1,27 +1,24 @@
 %%%-------------------------------------------------------------------
-%%% File    : instance.erl
-%%% Author  : Michael Melanson <michael@apollo.local>
-%%% Description : An instance of Monsoon
+%%% File    : connector.erl
+%%% Author  : Michael Melanson
+%%% Description : 
 %%%
-%%% Created : 18 Nov 2007 by Michael Melanson <michael@apollo.local>
+%%% Created : 2008-03-18 by Michael Melanson
 %%%-------------------------------------------------------------------
--module(instance).
+-module(connector).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, chunk_list/1, connect/3, peer_connected/2]).
+-export([start_link/0]).
 
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2,
-         handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
 
--record(state, {peers=[], chunks=[], listener, listen_socket}).
+-record(state, {socket}).
 
 -define(SERVER, ?MODULE).
-
-
--define(DEFAULT_PORT, 5000).
 
 %%====================================================================
 %% API
@@ -32,21 +29,6 @@
 %%--------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-
-connect(Instance, Host, Port) ->
-    gen_server:call(Instance, {connect, Host, Port}).
-
-peer_connected(Instance, Peer) ->
-    gen_server:cast(Instance, {peer_connected, Peer}).
-
-%%--------------------------------------------------------------------
-%% Function: chunk_list(Instance) -> [#chunk]
-%% Description: Starts the server
-%%--------------------------------------------------------------------
-chunk_list(Instance) ->
-    gen_server:call(Instance, chunk_list).
-
 
 %%====================================================================
 %% gen_server callbacks
@@ -60,16 +42,14 @@ chunk_list(Instance) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, ListenSocket} = gen_tcp:listen(?DEFAULT_PORT, [binary, 
-                                                        {packet, line}]),
-
-    Listener = spawn_listener(ListenSocket),
-    {ok, #state{listener=Listener, 
-                listen_socket=ListenSocket}}.
+    whiteboard:subscribe(),
+    
+    {ok, Sock} = gen_udp:open(protocol:broadcast_port(), [list]),
+    
+    {ok, #state{socket=Sock}}.
 
 %%--------------------------------------------------------------------
-%% Function: handle_call(Request, From, State) ->
-%%                                      {reply, Reply, State} |
+%% Function: handle_call(Request, From, State) -> {reply, Reply, State} |
 %%                                      {reply, Reply, State, Timeout} |
 %%                                      {noreply, State} |
 %%                                      {noreply, State, Timeout} |
@@ -77,14 +57,11 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({connect, Host, Port}, _From, State) ->
-    Peer = peer:start_link({connect, Host, Port}, self()),
-    gen_server:cast(self(), {add_peer, Peer}),
-    {reply, ok, State};
-
-handle_call(chunk_list, _From, State) ->
-    {reply, State#state.chunks, State}.
-
+handle_call({event, _}, _From, State) ->
+    {reply, false, State};
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -92,15 +69,8 @@ handle_call(chunk_list, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({peer_connected, Peer}, State) ->
-    error_logger:info_msg("~p new peer connected", [self()]),
-
-    Listener = spawn_listener(State#state.listen_socket),
-    gen_server:cast(self(), {add_peer, Peer}),
-    {noreply, State#state{listener=Listener}};
-
-handle_cast({add_peer, Peer}, State) ->
-    {noreply, State#state{peers=[Peer|State#state.peers]}}.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_info(Info, State) -> {noreply, State} |
@@ -108,7 +78,14 @@ handle_cast({add_peer, Peer}, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info({udp, _Sock, IP, _InPort, Data}, State) ->
+    case protocol:decode(Data) of
+        {node, Node, Port} ->
+            io:format("~p: Broadcast from ~p:~p (~p)~n", [?MODULE, IP, Port, Node]),
+            peer_sup:ensure_connected(Node, IP, Port);
+        _ ->
+            io:format("~p: Invalid broadcast received~n", [?MODULE])
+    end,
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -119,7 +96,6 @@ handle_info(_Info, State) ->
 %% The return value is ignored.
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) ->
-    io:format("Instance terminating~n"),
     ok.
 
 %%--------------------------------------------------------------------
@@ -130,10 +106,5 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%--------------------------------------------------------------------
-%% Internal functions
+%%% Internal functions
 %%--------------------------------------------------------------------
-spawn_listener(ListenSocket) ->
-    {ok, Listener} = peer:start_link({listen, ListenSocket}, self()),
-    error_logger:info_msg("~p new listener spawned: ~p~n", [self(),
-                                                            Listener]),
-    Listener.
